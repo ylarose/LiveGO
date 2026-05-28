@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini Live Audio</title>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f0f2f5; }
+        #status { margin-bottom: 20px; font-weight: bold; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; }
+        button:disabled { background: #ccc; }
+        #transcript { margin-top: 20px; width: 80%; max-height: 200px; overflow-y: auto; background: white; padding: 10px; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body>
+    <h1>Gemini Live Audio</h1>
+    <textarea id="promptText" rows="5" cols="100" style="border-style: solid;">You are a helpful feminin assistant. Your name is Jane.</textarea>
+    <button id="sendPrompt">Setup Prompt</button>
+	<br></br>
+    <div id="status">Disconnected</div>
+    <button id="startBtn">Start Session</button>
+    <div id="transcript"></div>
+
+    <script>
+        const promptText = document.getElementById('promptText');
+        const promptBtn = document.getElementById('sendPrompt');
+        const startBtn = document.getElementById('startBtn');
+        const statusDiv = document.getElementById('status');
+        const transcriptDiv = document.getElementById('transcript');
+
+        let socket;
+        let audioContext;
+        let processor;
+        let microphone;
+
+        promptBtn.onclick = async () => {
+			strPrompt = promptText.innerHTML;
+			console.log("sending prompt: " + strPrompt);
+			// a POST request to /prompt
+			const response = await fetch('/prompt', {
+			  method: 'POST',
+			  headers: {
+				'Content-Type': 'application/json; charset=utf-8'
+			  },
+			  body: JSON.stringify({ prompt: strPrompt }),
+			})
+			if (!response.ok) {
+				throw new Error(`Response status: ${response.status}`);
+			}
+			const result = await response.json();
+			console.log(result);			
+		}
+		
+		startBtn.onclick = async () => {
+            if (socket) {
+                stopSession();
+                return;
+            }
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                startSession(stream);
+		// startSession2("What is your name?");
+            } catch (err) {
+                console.error('Error accessing microphone:', err);
+                alert('Could not access microphone');
+            }
+        };
+
+	// to handle voice
+	function startSession(stream) {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            // socket = new WebSocket(`${protocol}//${window.location.host.pathname}/ws`);
+            socket = new WebSocket(`${protocol}//localhost:8080/ws`);
+	        socket.binaryType = 'arraybuffer';
+
+            socket.onopen = () => {
+                statusDiv.innerText = 'Connected';
+                startBtn.innerText = 'Stop Session';
+                setupAudio(stream);
+            };
+
+            socket.onclose = () => {
+                stopSession();
+            };
+
+            socket.onmessage = (event) => {
+                if (typeof event.data === 'string') {
+                    const msg = JSON.parse(event.data);
+                    if (msg.text) {
+                        const p = document.createElement('p');
+                        p.innerText = 'Gemini: ' + msg.text;
+                        transcriptDiv.appendChild(p);
+                        transcriptDiv.scrollTop = transcriptDiv.scrollHeight;
+                    }
+                } else {
+                    // Binary data: Play audio
+                    playAudioChunk(event.data);
+                }
+            };
+        }
+
+
+        function stopSession() {
+            if (socket) socket.close();
+            socket = null;
+            if (processor) processor.disconnect();
+            if (microphone) microphone.disconnect();
+            if (audioContext) audioContext.close();
+            
+            statusDiv.innerText = 'Disconnected';
+            startBtn.innerText = 'Start Session';
+        }
+
+        function setupAudio(stream) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+            microphone = audioContext.createMediaStreamSource(stream);
+            
+            // Using ScriptProcessor for simplicity in this example
+            processor = audioContext.createScriptProcessor(4096, 1, 1);
+            
+            processor.onaudioprocess = (e) => {
+                const inputData = e.inputBuffer.getChannelData(0);
+                const pcmData = floatTo16BitPCM(inputData);
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(pcmData.buffer);
+                }
+            };
+
+            microphone.connect(processor);
+            processor.connect(audioContext.destination);
+        }
+
+        function floatTo16BitPCM(input) {
+            const output = new Int16Array(input.length);
+            for (let i = 0; i < input.length; i++) {
+                const s = Math.max(-1, Math.min(1, input[i]));
+                output[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+            return output;
+        }
+
+        // Simple audio queue for playback
+        let nextStartTime = 0;
+        function playAudioChunk(data) {
+            if (!audioContext) return;
+
+            const int16Array = new Int16Array(data);
+            const floatArray = new Float32Array(int16Array.length);
+            for (let i = 0; i < int16Array.length; i++) {
+                floatArray[i] = int16Array[i] / 32768.0;
+            }
+
+            const buffer = audioContext.createBuffer(1, floatArray.length, 24000);
+            buffer.getChannelData(0).set(floatArray);
+
+            const source = audioContext.createBufferSource();
+            source.buffer = buffer;
+            source.connect(audioContext.destination);
+
+            const currentTime = audioContext.currentTime;
+            if (nextStartTime < currentTime) {
+                nextStartTime = currentTime;
+            }
+            source.start(nextStartTime);
+            nextStartTime += buffer.duration;
+        }
+    </script>
+</body>
+</html>
