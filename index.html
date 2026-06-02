@@ -14,8 +14,8 @@
 </head>
 <body>
     <h1>Gemini Live Audio</h1>
-    <textarea id="promptText" rows="5" cols="100" style="border-style: solid;">You are a helpful feminin assistant. Your name is Jane.</textarea>
-    <button id="sendPrompt">Setup Prompt</button>
+    <textarea id="promptText" rows="10" cols="100" style="border-style: solid;">You are a helpful feminin assistant. Your name is Jane.</textarea>
+	<button id="sendPrompt">Setup Prompt</button>
 	<br></br>
     <div id="status">Disconnected</div>
     <button id="startBtn">Start Session</button>
@@ -32,9 +32,9 @@
         let audioContext;
         let processor;
         let microphone;
-
+		
         promptBtn.onclick = async () => {
-			strPrompt = promptText.innerHTML;
+			strPrompt = document.getElementById("promptText").value;
 			console.log("sending prompt: " + strPrompt);
 			// a POST request to /prompt
 			const response = await fetch('/prompt', {

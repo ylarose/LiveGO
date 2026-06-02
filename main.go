@@ -12,6 +12,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"google.golang.org/genai"
+	"gemini-live/mytools"
 )
 
 var upgrader = websocket.Upgrader{
@@ -24,21 +25,39 @@ var MODEL_ID2 = "google/gemini-live-2.5-flash-native-audio"
 const MODEL_ID3 = "gemini-2.5-flash-native-audio-preview-12-2025"
 const MODEL_ID4 = "gemini-3.1-flash-live-preview"
 
+var PROMPT = "Your are a helpful assistant. Your name is Jane."
+
 type HTTPResponse struct {	
 	Reponse string
 	Value int
 }
+type SetupPrompt struct {	
+	Prompt string
+}
 
 const (
-	ModelName = MODEL_ID3; // "gemini-2.5-flash"
+	ModelName = MODEL_ID4; // "gemini-2.5-flash"
 )
 
+func openLog(fileName string) {
+	logFile, err := os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
+	if err != nil {
+		log.Fatalf("Error opening log file: %v", err)
+	}
+
+	// Set the output of the logger to our log file.
+	log.SetOutput(logFile)	
+
+}
+	
 func main() {
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
 		log.Fatal("GEMINI_API_KEY environment variable is required")
 	}
 
+	openLog("gemini-live.log")
+	
 	http.HandleFunc("/", serveHome)
 	http.HandleFunc("/prompt", servePrompt)
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
@@ -57,6 +76,7 @@ func main() {
 }
 
 func serveHome(w http.ResponseWriter, r *http.Request) {
+	log.Println("Serving file: index.html")
 	http.ServeFile(w, r, "index.html")
 }
 
@@ -81,8 +101,12 @@ func servePrompt(w http.ResponseWriter, r *http.Request) {
 
 	// Print the received data to the console.
 	// We convert the byte slice 'body' to a string.
-	fmt.Printf("Received data from browser: %s\n", string(body))
-
+	log.Printf("Received prompt from browser: %s\n", string(body))
+    prompt := SetupPrompt{}
+    json.Unmarshal(body, &prompt)
+	fmt.Printf("New Prompt: %s\n", prompt.Prompt)
+	PROMPT =  prompt.Prompt
+	
 	// To prevent Cross-Origin Resource Sharing (CORS) errors when running the
 	// HTML file locally, we need to add this header.
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -122,6 +146,7 @@ func testLive(session *genai.Session) {
         }
 }
 
+// simple function to trace what is in the genai Message
 func printMessage(msg *genai.LiveServerMessage) {
 	currentTime := time.Now()
 	strTime := currentTime.Format("2006-01-02 15:04:05")
@@ -161,7 +186,9 @@ func callFunction(session *genai.Session, fc *genai.FunctionCall) {
 
 	var result string
 	var responses []*genai.FunctionResponse
-			
+	
+	log.Printf("Calling function: %s\n", fc.Name)
+	
 	switch fc.Name {
 		case "getWeather":
 			// Extract the "city" argument.
@@ -171,8 +198,13 @@ func callFunction(session *genai.Session, fc *genai.FunctionCall) {
 				city = "unknown"
 			}
 			//result = getWeather(city)
-			result = "Today's weather in Paris will be sunny, with an average temporature of 22 degree Celcius"
-			
+			result = fmt.Sprintf("Today's weather in %s will be sunny, with an average temporature of 22 degree Celcius", city)
+		case "getDeliveryByNumber":
+			number, _ := fc.Args["number"].(string)
+			if number == "" {
+				number = "unknown"
+			}
+			result = mytools.FindPackageByNumber(number)
 		default:
 			result = fmt.Sprintf("unknown tool: %s", fc.Name)
 		}
@@ -190,6 +222,8 @@ func callFunction(session *genai.Session, fc *genai.FunctionCall) {
 			},
 		})
 
+	log.Printf("Function result: %s\n", result)
+
 	// Send all responses back in a single SendToolResponse call.
 	// The model will resume speaking once it receives these.
 	err := session.SendToolResponse(genai.LiveToolResponseInput{
@@ -203,6 +237,7 @@ func callFunction(session *genai.Session, fc *genai.FunctionCall) {
 
 
 func handleWebSocket(w http.ResponseWriter, r *http.Request, apiKey string) {
+	fmt.Println("Creating websocket ", r)
 	wsConn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("WebSocket upgrade failed: %v", err)
@@ -225,6 +260,22 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, apiKey string) {
 		},
 	}
 
+	getDeliveryByNumber := genai.FunctionDeclaration{
+                Name:        "getDeliveryByNumber",
+                Description: "Get package delivery information, using the package number.",
+                Parameters: &genai.Schema{
+                        Type: genai.TypeObject,
+                        Properties: map[string]*genai.Schema{
+                                "number": {
+                                        Type:        genai.TypeString,
+                                        Description: "The package or delivery number, e.g., '4567', '1233'.",
+                                },
+                        },
+                        Required: []string{"number"},
+                },
+        }
+
+	fmt.Println("Creating GenAI client...")
 	ctx := context.Background()
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
 		APIKey:  apiKey,
@@ -234,28 +285,37 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, apiKey string) {
 		log.Printf("Failed to create GenAI client: %v", err)
 		return
 	}
-
+	log.Println("genAI Client created!");
+	fmt.Println("genAI Client created!");
+	
 	// modality := []genai.Modality{"AUDIO", "TEXT"};
 	modality := []genai.Modality{"AUDIO"};
-	var part = genai.Part{Text: "Your are a helpful assistant. Your name is Jane."};
+	var part = genai.Part{Text: PROMPT};
 	parts := []*genai.Part{&part};
 	systemInstruct := genai.Content{Parts: parts};
 	weatherTool := genai.Tool{
 		FunctionDeclarations: []*genai.FunctionDeclaration{&getWeatherFunc},
 	}
-	listTools := []*genai.Tool{&weatherTool}
+	deliveryTool := genai.Tool{
+		FunctionDeclarations: []*genai.FunctionDeclaration{&getDeliveryByNumber},
+	}
+	listTools := []*genai.Tool{&weatherTool, &deliveryTool}
 	config := &genai.LiveConnectConfig{
 		ResponseModalities: modality,
 		Tools: listTools,
 	}
 	config.SystemInstruction = &systemInstruct;
+
+	log.Println("Trying to connect to gemini live!");
 	session, err := client.Live.Connect(ctx, ModelName, config)
 	if err != nil {
 		log.Printf("Failed to connect to Gemini Live: %v", err)
 		return
 	}
 	log.Println("Connected to gemini live!");
-	testLive(session);
+	fmt.Println("Connected to gemini live!");
+	// testLive(session);
+	
 	defer session.Close()
 
 	// Error channel for goroutines
@@ -285,7 +345,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, apiKey string) {
 				}
 			} else if messageType == websocket.TextMessage {
 			// Potential text input from user
-				// log.Println("getting text message on websocket");
+				log.Println("getting text message on websocket");
 				var textMsg map[string]string
 				if err := json.Unmarshal(data, &textMsg); err == nil {
 					if text, ok := textMsg["text"]; ok {
@@ -315,7 +375,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, apiKey string) {
 	go func() {
 		for {
 			resp, err := session.Receive()
-			// log.Println("Got something from gemini");
+			log.Println("Got something from gemini");
 			if err != nil {
 				errChan <- fmt.Errorf("Gemini receive error: %w", err)
 				return
@@ -347,7 +407,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, apiKey string) {
 						}
 						if part.Text != "" {
 							// Forward text to browser
-							// log.Println("got part text");
+							log.Println("got part text");
 							msg := map[string]string{"text": part.Text}
 							jsonMsg, _ := json.Marshal(msg)
 							log.Println("got part text: ", msg);
