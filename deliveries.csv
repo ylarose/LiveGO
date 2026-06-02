@@ -1,0 +1,4 @@
+FirstName,LastName,Number,Status,StreetAddress,City
+Jean,Dupond,1234,Delivered,123 rue des rosiers,Lyon
+Yanick,Larose,4455,Cancelled,30 cours Seguin,Boulogne-Billancourt
+Eric,Beau,2345,InProgress,40 rue Jean Moulin,Lyon
