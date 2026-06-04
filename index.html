@@ -5,30 +5,52 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gemini Live Audio</title>
     <style>
-        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f0f2f5; }
+        .mainContent { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f0f2f5; }
         #status { margin-bottom: 20px; font-weight: bold; }
         button { padding: 10px 20px; font-size: 16px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; }
         button:disabled { background: #ccc; }
         #transcript { margin-top: 20px; width: 80%; max-height: 200px; overflow-y: auto; background: white; padding: 10px; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-    </style>
+		.systemMsg { border: 5px outset red;  background-color: lightblue; align-items: right; text-align: center;}
+	</style>
 </head>
 <body>
-    <h1>Gemini Live Audio</h1>
-    <textarea id="promptText" rows="10" cols="100" style="border-style: solid;">You are a helpful feminin assistant. Your name is Jane.</textarea>
+    <table style="width:100%"><tr><td style="align:left" style="width:90%"></td><td style="align:right" style="width:10%"><div class="systemMsg" id="messages">system messages</div></td></tr></table>
+	<div class="mainContent">
+    <h1 style="align:center">Gemini Live Audio</h1>
+    <textarea id="promptText" rows="15" cols="150" style="border-style: solid;">
+	Ton nom est Marie, tu parles francais avec une voix féminine et un accent francais, et tu aides des clients à localiser leur colis.
+	Commences la conversation par donner ton nom, et demander comment tu peux aider le client à localiser le colis.
+	Ton role est de demander au client le numéro de colis, et de lui donner des informations sur ce colis.
+	Tu as à ta disposition deux outils : 
+	- "getDeliveryByNumber" qui donne prend en entrée le numéro de colis, et retourne des informations en 
+	anglais sur le colis. 
+	- "getDeliveryByName" qui prend en entrée le nom propre du client,  et retourne des informations en 
+	anglais sur le colis. 
+	Utilise the 2e outil: "getDeliveryByName" uniquement si le premier n'a pas donné de résultat
+	Les informations retournées par les deux outils ont la meme structure:
+	Nom du client, numéro de colis, status (delivered, cancelled, delayed) et addresse de livraison.
+	Par exemple:
+	"Delivery information: LastName=Dupond, Number=1234, Status=Delivered, Address=12 rue de paix, City=Paris"
+
+	Finis la conversation en demandant au client s'il a une autre question.	
+	</textarea>
 	<button id="sendPrompt">Setup Prompt</button>
 	<br></br>
     <div id="status">Disconnected</div>
     <button id="startBtn">Start Session</button>
     <div id="transcript"></div>
-
+	
+	</div>
+	
     <script>
         const promptText = document.getElementById('promptText');
         const promptBtn = document.getElementById('sendPrompt');
         const startBtn = document.getElementById('startBtn');
         const statusDiv = document.getElementById('status');
         const transcriptDiv = document.getElementById('transcript');
-
-        let socket;
+		const systemMsgDiv = document.getElementById('messages');
+        
+		let socket;
         let audioContext;
         let processor;
         let microphone;
@@ -47,8 +69,10 @@
 			if (!response.ok) {
 				throw new Error(`Response status: ${response.status}`);
 			}
-			const result = await response.json();
-			console.log(result);			
+			const jsResult = await response.json();
+			resp = jsResult["Response"]
+			console.log(resp);
+			systemMsgDiv.innerText = resp;			
 		}
 		
 		startBtn.onclick = async () => {

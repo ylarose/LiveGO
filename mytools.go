@@ -96,6 +96,25 @@ func FindPackageByNumber(nb string) string {
 	return notFound
 }
 
+
+// return package delivery information, from package number
+func FindPackageByName(name string) string {
+	// read data from file, if not already done
+	fmt.Printf("Calling  FindPackageByName(%s)\n", name)
+	if deliveryData == nil {ReadCSV()}
+	if deliveryData != nil {
+		for _, info := range deliveryData {
+			if name == info.LastName {
+				res := fmt.Sprintf("Delivery information: LastName=%s, Number=%s, Status=%s, Address=%s, City=%s", info.LastName, info.Number, info.Status, info.StreetAddress, info.City)
+				fmt.Println("returning: ", res)
+				return res
+			}
+		}
+	}
+	notFound := "Package cannot be found"
+	return notFound
+}
+
 /*
 func main() {
 	ReadCSV()
