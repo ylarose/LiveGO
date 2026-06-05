@@ -77,10 +77,24 @@ func main() {
 	}
 }
 
-// by default / goes to /index.htlm
+/* by default / goes to /index.htlm
 func serveHome(w http.ResponseWriter, r *http.Request) {
 	log.Println("Serving file: index.html")
 	http.ServeFile(w, r, "index.html")
+}
+*/
+
+func serveHome(w http.ResponseWriter, r *http.Request) {
+        if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+                http.ServeFile(w, r, "index.html")
+                return
+        }
+        path := r.URL.Path[1:]
+        if _, err := os.Stat(path); err == nil {
+                http.ServeFile(w, r, path)
+                return
+        }
+        http.ServeFile(w, r, "index.html")
 }
 
 // API to get Prompt from HMTL or HTTP request, and set it for the model
